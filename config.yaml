@@ -1,0 +1,21 @@
+# Mappar att genomsöka
+folders:
+  - C:/Users/gunther/Dropbox/arkiv/larsArkiv/predikningar-studier/karismatik-helande/helande-uppsatser-bocker
+
+# Filformat att behandla
+extensions:
+  - .pdf
+  - .docx
+  - .txt
+  - .rtf
+
+# Rapport
+output:
+  report: output/rapport.docx
+  zotero: output/zotero_export.ris
+  log: logs/processed_files.json
+
+# Claude-modell
+anthropic:
+  model: claude-sonnet-4-6
+  max_tokens: 1000
