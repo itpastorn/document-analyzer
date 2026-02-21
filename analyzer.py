@@ -62,8 +62,8 @@ def analyze_document(client, model, max_tokens, filepath, content):
     prompt = f"""Analysera följande dokument och svara ENDAST med ett JSON-objekt i detta exakta format (inga kommentarer, inga markdown-kodblock):
 {{
   "title": "dokumentets titel eller ett beskrivande namn om titel saknas",
-  "author": "författare eller 'Okänd' om det inte framgår. Flera författare separeras med semikolon",
-  "summary": "sammanfattning på svenska med 20-100 ord beroende på innehållets komplexitet",
+  "author": "författare i formatet 'Efternamn, Förnamn' eller 'Okänd' om det inte framgår. Flera författare separeras med semikolon",
+  "summary": "sammanfattning på svenska med 30-150 ord beroende på innehållets komplexitet",
   "type": "en av: artikel, uppsats, bok, predikan, studie, övrigt (använd 'bok' även för äldre böcker utan ISBN)",
   "year": "utgivningsår som heltal eller null om okänt",
   "date_full": "exakt datum i formatet YYYY-MM-DD om det går att fastställa, annars null",
@@ -185,6 +185,15 @@ def generate_word_report(results, output_path):
     doc.save(output_path)
     print(f"Word-rapport sparad: {output_path}")
 
+# Formatera författarnamn för RIS (efternamn, förnamn)
+def format_ris_author(name):
+    name = name.strip()
+    if "," in name:
+        return name
+    parts = name.split()
+    if len(parts) >= 2:
+        return f"{parts[-1]}, {' '.join(parts[:-1])}"
+    return name
 
 # Generera Zotero RIS-export
 def generate_zotero_export(results, output_path):
@@ -207,7 +216,7 @@ def generate_zotero_export(results, output_path):
 
         author = item.get("author", "Okänd")
         for a in author.split(";"):
-            lines.append(f"AU  - {a.strip()}")
+            lines.append(f"AU  - {format_ris_author(a)}")
 
         # Datum
         if item.get("date_full"):
