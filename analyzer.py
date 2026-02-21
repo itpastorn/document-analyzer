@@ -5,9 +5,6 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 import anthropic
-from docx import Document as DocxDocument
-from docx.shared import Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 # Ladda API-nyckel från .env
 load_dotenv()
@@ -53,14 +50,27 @@ def read_file(filepath):
 
 # Analysera dokument med Claude
 def analyze_document(client, model, max_tokens, filepath, content):
-    prompt = f"""Analysera följande dokument och svara ENDAST med ett JSON-objekt i detta format:
+    prompt = f"""Analysera följande dokument och svara ENDAST med ett JSON-objekt i detta exakta format (inga kommentarer, inga markdown-kodblock):
 {{
   "title": "dokumentets titel eller ett beskrivande namn om titel saknas",
-  "author": "författare eller 'Okänd' om det inte framgår",
-  "summary": "sammanfattning på svenska med 10-50 ord beroende på innehållets komplexitet",
-  "type": "en av: artikel, uppsats, bok, predikan, studie, övrigt",
-  "year": "utgivningsår eller null om okänt",
-  "is_citable": true eller false (true om det är en akademisk artikel, uppsats eller bok)
+  "author": "författare eller 'Okänd' om det inte framgår. Flera författare separeras med semikolon",
+  "summary": "sammanfattning på svenska med 20-100 ord beroende på innehållets komplexitet",
+  "type": "en av: artikel, uppsats, bok, predikan, studie, övrigt (använd 'bok' även för äldre böcker utan ISBN)",
+  "year": "utgivningsår som heltal eller null om okänt",
+  "date_full": "exakt datum i formatet YYYY-MM-DD om det går att fastställa, annars null",
+  "is_citable": true eller false,
+
+  "publication": "tidskrift eller bok som artikeln publicerats i, eller null om ej artikel",
+
+  "publisher": "förlagets namn eller null om okänt eller ej bok",
+  "publisher_place": "utgivningsort eller null om okänd eller ej bok",
+  "isbn": "ISBN om det finns angivet, annars null",
+  "pages_total": "totalt antal sidor som heltal eller null om okänt",
+  "edition": "upplaga t.ex. '2nd edition' eller null om ej angiven",
+
+  "institution": "lärosäte för uppsats/avhandling eller null om ej tillämpligt",
+  "institution_place": "ort för lärosätet eller null om ej tillämpligt",
+  "thesis_type": "t.ex. 'Kandidatuppsats', 'Masteruppsats', 'Doktorsavhandling' eller null om ej tillämpligt"
 }}
 
 Filnamn: {Path(filepath).name}
@@ -74,7 +84,6 @@ Dokumentets innehåll (kan vara avkortat):
         messages=[{"role": "user", "content": prompt}]
     )
     raw = message.content[0].text.strip()
-    # Ta bort eventuella markdown-kodblock
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -95,7 +104,12 @@ def find_files(folders, extensions, log):
                         print(f"  Hoppar över (redan processad): {filename}")
     return files
 
+# Generera Word-rapport
 def generate_word_report(results, output_path):
+    from docx import Document as DocxDocument
+    from docx.shared import Pt, RGBColor
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     doc = DocxDocument()
 
@@ -122,13 +136,34 @@ def generate_word_report(results, output_path):
         doc.add_heading(doc_type.capitalize(), level=1)
         for item in items:
             # Rubrik
-            h = doc.add_heading(item.get("title", "Utan titel"), level=2)
-            # Författare och år
-            meta = f"Författare: {item.get('author', 'Okänd')}"
-            if item.get("year"):
-                meta += f"  |  År: {item['year']}"
+            doc.add_heading(item.get("title", "Utan titel"), level=2)
+
+            # Författare och år/datum
+            date_str = item.get("date_full") or item.get("year") or "okänt"
+            meta = f"Författare: {item.get('author', 'Okänd')}  |  År: {date_str}"
             p = doc.add_paragraph(meta)
             p.runs[0].italic = True
+
+            # Artikelspecifikt: publikation
+            if item.get("type") == "artikel" and item.get("publication"):
+                pub = doc.add_paragraph(f"Publikation: {item['publication']}")
+                pub.runs[0].italic = True
+
+            # Uppsatsspecifikt: lärosäte
+            if item.get("type") in ("uppsats", "avhandling") and item.get("institution"):
+                inst_str = item["institution"]
+                if item.get("institution_place"):
+                    inst_str += f", {item['institution_place']}"
+                if item.get("thesis_type"):
+                    inst_str += f" ({item['thesis_type']})"
+                ins = doc.add_paragraph(f"Lärosäte: {inst_str}")
+                ins.runs[0].italic = True
+
+            # Filnamn
+            fn = doc.add_paragraph(f"Fil: {Path(item['filepath']).name}")
+            fn.runs[0].font.size = Pt(9)
+            fn.runs[0].font.color.rgb = RGBColor(128, 128, 128)
+
             # Sammanfattning
             doc.add_paragraph(item.get("summary", ""))
             doc.add_paragraph()
@@ -136,6 +171,8 @@ def generate_word_report(results, output_path):
     doc.save(output_path)
     print(f"Word-rapport sparad: {output_path}")
 
+
+# Generera Zotero RIS-export
 def generate_zotero_export(results, output_path):
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     citable = [r for r in results if r.get("is_citable")]
@@ -143,6 +180,7 @@ def generate_zotero_export(results, output_path):
     type_map = {
         "artikel": "JOUR",
         "uppsats": "THES",
+        "avhandling": "THES",
         "bok": "BOOK",
         "studie": "RPRT",
     }
@@ -157,10 +195,40 @@ def generate_zotero_export(results, output_path):
         for a in author.split(";"):
             lines.append(f"AU  - {a.strip()}")
 
-        if item.get("year"):
+        # Datum
+        if item.get("date_full"):
+            lines.append(f"DA  - {item['date_full']}")
+        elif item.get("year"):
             lines.append(f"PY  - {item['year']}")
 
-        lines.append(f"N2  - {item.get('summary', '')}")
+        # Sammanfattning
+        if item.get("summary"):
+            lines.append(f"N2  - {item['summary']}")
+
+        # Artikelspecifikt
+        if item.get("publication"):
+            lines.append(f"JO  - {item['publication']}")
+
+        # Bokspecifikt
+        if item.get("publisher"):
+            lines.append(f"PB  - {item['publisher']}")
+        if item.get("publisher_place"):
+            lines.append(f"CY  - {item['publisher_place']}")
+        if item.get("isbn"):
+            lines.append(f"SN  - {item['isbn']}")
+        if item.get("pages_total"):
+            lines.append(f"SP  - {item['pages_total']} sidor")
+        if item.get("edition"):
+            lines.append(f"ET  - {item['edition']}")
+
+        # Uppsatsspecifikt
+        if item.get("institution"):
+            lines.append(f"PB  - {item['institution']}")
+        if item.get("institution_place"):
+            lines.append(f"CY  - {item['institution_place']}")
+        if item.get("thesis_type"):
+            lines.append(f"M3  - {item['thesis_type']}")
+
         lines.append("ER  - ")
         lines.append("")
 
@@ -168,6 +236,7 @@ def generate_zotero_export(results, output_path):
         f.write("\n".join(lines))
 
     print(f"Zotero RIS-fil sparad: {output_path} ({len(citable)} poster)")
+
 
 # Huvudfunktion
 def main():
@@ -201,7 +270,6 @@ def main():
             analysis["filepath"] = filepath
             results.append(analysis)
 
-            # Spara till logg direkt
             log[filepath] = {
                 "processed": datetime.now().isoformat(),
                 "title": analysis.get("title"),
