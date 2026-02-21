@@ -5,6 +5,9 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 import anthropic
+from docx import Document as DocxDocument
+from docx.shared import Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 
 # Ladda API-nyckel från .env
 load_dotenv()
@@ -92,6 +95,80 @@ def find_files(folders, extensions, log):
                         print(f"  Hoppar över (redan processad): {filename}")
     return files
 
+def generate_word_report(results, output_path):
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    doc = DocxDocument()
+
+    # Titel
+    title = doc.add_heading("Dokumentanalys", 0)
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Datum
+    date_para = doc.add_paragraph(f"Genererad: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    date_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    doc.add_paragraph()
+
+    # Sammanfattning
+    doc.add_heading(f"Totalt analyserade dokument: {len(results)}", level=2)
+    doc.add_paragraph()
+
+    # Gruppera efter typ
+    by_type = {}
+    for r in results:
+        t = r.get("type", "övrigt")
+        by_type.setdefault(t, []).append(r)
+
+    for doc_type, items in sorted(by_type.items()):
+        doc.add_heading(doc_type.capitalize(), level=1)
+        for item in items:
+            # Rubrik
+            h = doc.add_heading(item.get("title", "Utan titel"), level=2)
+            # Författare och år
+            meta = f"Författare: {item.get('author', 'Okänd')}"
+            if item.get("year"):
+                meta += f"  |  År: {item['year']}"
+            p = doc.add_paragraph(meta)
+            p.runs[0].italic = True
+            # Sammanfattning
+            doc.add_paragraph(item.get("summary", ""))
+            doc.add_paragraph()
+
+    doc.save(output_path)
+    print(f"Word-rapport sparad: {output_path}")
+
+def generate_zotero_export(results, output_path):
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    citable = [r for r in results if r.get("is_citable")]
+
+    type_map = {
+        "artikel": "JOUR",
+        "uppsats": "THES",
+        "bok": "BOOK",
+        "studie": "RPRT",
+    }
+
+    lines = []
+    for item in citable:
+        ris_type = type_map.get(item.get("type", ""), "GEN")
+        lines.append(f"TY  - {ris_type}")
+        lines.append(f"TI  - {item.get('title', 'Utan titel')}")
+
+        author = item.get("author", "Okänd")
+        for a in author.split(";"):
+            lines.append(f"AU  - {a.strip()}")
+
+        if item.get("year"):
+            lines.append(f"PY  - {item['year']}")
+
+        lines.append(f"N2  - {item.get('summary', '')}")
+        lines.append("ER  - ")
+        lines.append("")
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    print(f"Zotero RIS-fil sparad: {output_path} ({len(citable)} poster)")
+
 # Huvudfunktion
 def main():
     config = load_config()
@@ -137,7 +214,8 @@ def main():
             print(f"  ✗ Fel vid analys: {e}")
 
     print(f"\nKlart! {len(results)} dokument analyserade.")
-    print("Rapport och Zotero-export kommer i nästa steg.")
+    generate_word_report(results, config["output"]["report"])
+    generate_zotero_export(results, config["output"]["zotero"])
 
 if __name__ == "__main__":
     main()
