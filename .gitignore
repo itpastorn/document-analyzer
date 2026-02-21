@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# API-nyckel
+.env
+
+# Output och loggar (stannar lokalt)
+output/
+logs/
+
+# Dropbox-specifikt
+.dropbox
+desktop.ini
