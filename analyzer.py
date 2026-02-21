@@ -114,7 +114,7 @@ def find_files(folders, extensions, log):
     return files
 
 # Generera Word-rapport
-def generate_word_report(results, output_path):
+def generate_word_report(results, output_path, folder_name=""):
     from docx import Document as DocxDocument
     from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
@@ -128,7 +128,7 @@ def generate_word_report(results, output_path):
     doc = DocxDocument()
 
     # Titel
-    title = doc.add_heading("Dokumentanalys", 0)
+    title = doc.add_heading(f"Analys av innehåll i mappen {folder_name}", 0)
     title.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     # Datum
@@ -305,8 +305,13 @@ def main():
             print(f"  ✗ Fel vid analys: {e}")
 
     print(f"\nKlart! {len(results)} dokument analyserade.")
-    generate_word_report(results, config["output"]["report"])
-    generate_zotero_export(results, config["output"]["zotero"])
+    # Hämta mappnamn för rapport och filnamn
+    folder_name = Path(config["folders"][0]).name
+    report_path = config["output"]["report"].replace("rapport", f"analys-{folder_name}")
+    zotero_path = config["output"]["zotero"].replace("zotero_export", f"zotero_import_{folder_name}")
+
+    generate_word_report(results, report_path, folder_name)
+    generate_zotero_export(results, zotero_path)
 
 if __name__ == "__main__":
     main()
