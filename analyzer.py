@@ -48,6 +48,15 @@ def read_file(filepath):
         print(f"  Kunde inte läsa {filepath}: {e}")
         return None
 
+# Kontrollera om filen är låst (öppen i annat program)
+def check_file_locked(filepath):
+    try:
+        with open(filepath, "a"):
+            pass
+        return False
+    except IOError:
+        return True
+
 # Analysera dokument med Claude
 def analyze_document(client, model, max_tokens, filepath, content):
     prompt = f"""Analysera följande dokument och svara ENDAST med ett JSON-objekt i detta exakta format (inga kommentarer, inga markdown-kodblock):
@@ -111,6 +120,11 @@ def generate_word_report(results, output_path):
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+    if check_file_locked(output_path):
+        print(f"\n⚠️  Kan inte spara rapporten – filen är öppen i Word:")
+        print(f"   {output_path}")
+        print(f"   Stäng filen och tryck Enter för att försöka igen...")
+        input()
     doc = DocxDocument()
 
     # Titel
