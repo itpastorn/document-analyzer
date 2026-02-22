@@ -111,8 +111,45 @@ def convert(sam_path):
     print(f"Sparad: {out_path}")
     print(f"Antal stycken: {len(paragraphs)}")
 
+import os
+
+def convert_all(folder="."):
+    folder = Path(folder)
+    seen = set()
+    sam_files = []
+    for f in folder.iterdir():
+        if f.suffix.lower() == '.sam' and f.name.lower() not in seen:
+            seen.add(f.name.lower())
+            sam_files.append(f)
+    
+    if not sam_files:
+        print("Inga .SAM-filer hittades.")
+        return
+    
+    print(f"Hittade {len(sam_files)} filer.\n")
+    
+    for sam_path in sam_files:
+        try:
+            # Spara tidsstämplar
+            stat = sam_path.stat()
+            mtime = stat.st_mtime
+            atime = stat.st_atime
+
+            convert(sam_path)
+
+            # Återställ tidsstämplar på den nya .docx-filen
+            out_path = Path(str(sam_path.with_suffix('.docx')).lower())
+            os.utime(out_path, (atime, mtime))
+
+        except Exception as e:
+            print(f"  ✗ Fel vid konvertering av {sam_path.name}: {e}")
+
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Användning: python convert-sam-to-docx.py filnamn.SAM")
-        sys.exit(1)
-    convert(sys.argv[1])
+    if len(sys.argv) == 2:
+        arg = sys.argv[1]
+        if arg.lower().endswith('.sam'):
+            convert(sys.argv[1])
+        else:
+            convert_all(sys.argv[1])
+    else:
+        convert_all()
