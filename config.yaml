@@ -8,6 +8,8 @@ extensions:
   - .docx
   - .txt
   - .rtf
+  - .ppt
+  - .pptx
 
 # Rapport
 output:

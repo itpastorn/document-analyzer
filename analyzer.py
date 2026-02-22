@@ -38,6 +38,15 @@ def read_file(filepath):
             from docx import Document
             doc = Document(filepath)
             return "\n".join([p.text for p in doc.paragraphs])
+        elif suffix in (".ppt", ".pptx"):
+            from pptx import Presentation
+            prs = Presentation(filepath)
+            texts = []
+            for slide in prs.slides:
+                for shape in slide.shapes:
+                    if hasattr(shape, "text") and shape.text.strip():
+                        texts.append(shape.text)
+            return "\n".join(texts)
         elif suffix == ".pdf":
             from pypdf import PdfReader
             reader = PdfReader(filepath)
@@ -198,7 +207,15 @@ def format_ris_author(name):
 # Generera Zotero RIS-export
 def generate_zotero_export(results, output_path):
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    citable = [r for r in results if r.get("is_citable")]
+    NON_CITABLE_TYPES = {"predikan", "övrigt"}
+    NON_CITABLE_EXTENSIONS = {".ppt", ".pptx"}
+    
+    citable = [
+        r for r in results
+        if r.get("is_citable")
+        and r.get("type") not in NON_CITABLE_TYPES
+        and Path(r.get("filepath", "")).suffix.lower() not in NON_CITABLE_EXTENSIONS
+    ]
 
     type_map = {
         "artikel": "JOUR",
