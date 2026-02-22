@@ -55,6 +55,76 @@ För att köra om alla filer, ta bort loggfilen:
 ```bash
 rm logs/processed_files.json
 ```
+## Köra från valfri mapp
+
+Istället för att ange mappar i `config.yaml` kan du köra skriptet direkt
+från den mapp du vill analysera. Sätt upp ett alias en gång, sedan räcker
+det att skriva `analyze` i terminalen.
+
+### Git Bash (Windows)
+
+Lägg till följande i `~/.bashrc` eller `~/.bash_profile`:
+```bash
+export ANALYZER_HOME="/c/Users/username/path/to/document-analyzer"
+alias analyze='python "$ANALYZER_HOME/analyzer.py" --folder "$(pwd)"'
+```
+
+Aktivera direkt utan att starta om terminalen:
+```bash
+source ~/.bashrc
+```
+
+### Terminal (Linux)
+
+Lägg till följande i `~/.bashrc`:
+```bash
+export ANALYZER_HOME="$HOME/path/to/document-analyzer"
+alias analyze='python "$ANALYZER_HOME/analyzer.py" --folder "$(pwd)"'
+```
+
+Aktivera:
+```bash
+source ~/.bashrc
+```
+
+### Terminal (Mac)
+
+Lägg till följande i `~/.zshrc`:
+```bash
+export ANALYZER_HOME="$HOME/path/to/document-analyzer"
+alias analyze='python "$ANALYZER_HOME/analyzer.py" --folder "$(pwd)"'
+```
+
+Aktivera:
+```bash
+source ~/.zshrc
+```
+
+### PowerShell (Windows)
+
+Öppna din profil med:
+```powershell
+notepad $PROFILE
+```
+
+Lägg till:
+```powershell
+$env:ANALYZER_HOME = "C:\Users\username\path\to\document-analyzer"
+function analyze { python "$env:ANALYZER_HOME\analyzer.py" --folder (Get-Location) }
+```
+
+Starta om PowerShell för att aktivera.
+
+### Användning efter uppsättning
+
+Navigera till den mapp du vill analysera och kör:
+```bash
+cd /path/to/folder
+analyze
+```
+
+Rapport och Zotero-fil sparas i `output/`-mappen i projektkatalogen,
+med mappnamnet inbakat i filnamnet.
 
 ## Projektstruktur
 ```
