@@ -313,7 +313,8 @@ def main():
             log[filepath] = {
                 "processed": datetime.now().isoformat(),
                 "title": analysis.get("title"),
-                "author": analysis.get("author")
+                "author": analysis.get("author"),
+                "analysis": analysis
             }
             save_log(log_path, log)
             print(f"  ✓ {analysis.get('author', 'Okänd')} – {analysis.get('title', 'Utan titel')}")
@@ -322,13 +323,22 @@ def main():
             print(f"  ✗ Fel vid analys: {e}")
 
     print(f"\nKlart! {len(results)} dokument analyserade.")
+
+    # Bygg lista med alla resultat - nya + tidigare analyserade
+    all_results = []
+    for filepath, entry in log.items():
+        if "analysis" in entry:
+            all_results.append(entry["analysis"])
+
+    print(f"Totalt i rapport: {len(all_results)} dokument.")
+
     # Hämta mappnamn för rapport och filnamn
     folder_name = Path(config["folders"][0]).name
     report_path = config["output"]["report"].replace("rapport", f"analys-{folder_name}")
     zotero_path = config["output"]["zotero"].replace("zotero_export", f"zotero_import_{folder_name}")
 
-    generate_word_report(results, report_path, folder_name)
-    generate_zotero_export(results, zotero_path)
+    generate_word_report(all_results, report_path, folder_name)
+    generate_zotero_export(all_results, zotero_path)
 
 if __name__ == "__main__":
     main()
