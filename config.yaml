@@ -11,12 +11,6 @@ extensions:
   - .ppt
   - .pptx
 
-# Rapport
-output:
-  report: output/rapport.docx
-  zotero: output/zotero_export.ris
-  log: logs/processed_files.json
-
 # Claude-modell
 anthropic:
   model: claude-sonnet-4-6

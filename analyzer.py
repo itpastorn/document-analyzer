@@ -5,13 +5,15 @@ from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 import anthropic
+import argparse
 
 # Ladda API-nyckel från .env
-load_dotenv()
+load_dotenv(Path(__file__).parent / ".env")
 
 # Ladda konfiguration
 def load_config():
-    with open("config.yaml", "r", encoding="utf-8") as f:
+    config_path = Path(__file__).parent / "config.yaml"
+    with open(config_path, "r", encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 # Ladda logg över redan processade filer
@@ -113,6 +115,8 @@ def find_files(folders, extensions, log):
     files = []
     for folder in folders:
         for root, dirs, filenames in os.walk(folder):
+            # Hoppa över analyzer-mappar
+            dirs[:] = [d for d in dirs if d != "analyzer"]
             for filename in filenames:
                 filepath = str(Path(root) / filename)
                 if Path(filepath).suffix.lower() in extensions:
@@ -287,8 +291,24 @@ def generate_zotero_export(results, output_path):
 
 # Huvudfunktion
 def main():
+    # Hantera kommandoradsargument
+    parser = argparse.ArgumentParser(description="Analysera dokument i en mapp")
+    parser.add_argument("--folder", type=str, help="Mapp att analysera (överskriver config.yaml)")
+    args = parser.parse_args()
+
     config = load_config()
-    log_path = config["output"]["log"]
+
+    # Överskrid config om --folder angivits
+    if args.folder:
+        config["folders"] = [str(Path(args.folder).resolve())]
+
+    # Definiera alla sökvägar tidigt
+    folder_name = Path(config["folders"][0]).name
+    base_output = Path(config["folders"][0]) / "analyzer"
+    log_path = str(base_output / "processed_files.json")
+    report_path = str(base_output / f"analys-{folder_name}.docx")
+    zotero_path = str(base_output / f"zotero_import_{folder_name}.ris")
+
     log = load_log(log_path)
 
     client = anthropic.Anthropic()
@@ -338,11 +358,6 @@ def main():
             all_results.append(entry["analysis"])
 
     print(f"Totalt i rapport: {len(all_results)} dokument.")
-
-    # Hämta mappnamn för rapport och filnamn
-    folder_name = Path(config["folders"][0]).name
-    report_path = config["output"]["report"].replace("rapport", f"analys-{folder_name}")
-    zotero_path = config["output"]["zotero"].replace("zotero_export", f"zotero_import_{folder_name}")
 
     generate_word_report(all_results, report_path, folder_name)
     generate_zotero_export(all_results, zotero_path)
