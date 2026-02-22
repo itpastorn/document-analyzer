@@ -187,6 +187,13 @@ def generate_word_report(results, output_path, folder_name=""):
             fn.runs[0].font.size = Pt(9)
             fn.runs[0].font.color.rgb = RGBColor(128, 128, 128)
 
+            # Undermapp (om filen inte ligger direkt i rotmappen)
+            file_folder = Path(item['filepath']).parent.name
+            if file_folder != folder_name:
+                mapp = doc.add_paragraph(f"Mapp: {file_folder}")
+                mapp.runs[0].font.size = Pt(9)
+                mapp.runs[0].font.color.rgb = RGBColor(128, 128, 128)
+
             # Sammanfattning
             doc.add_paragraph(item.get("summary", ""))
             doc.add_paragraph()
