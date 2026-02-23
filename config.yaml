@@ -17,4 +17,4 @@ anthropic:
   max_tokens: 1000
 
 # Om författare inte kan extraheras, använd detta som standard
-default_author: "Lars Gunther"
+default_author: "Gunther, Lars" 

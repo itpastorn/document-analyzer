@@ -218,6 +218,15 @@ def format_ris_author(name):
         return f"{parts[-1]}, {' '.join(parts[:-1])}"
     return name
 
+# Omvandla filväg till file:/// URI
+# Används för att skapa länkar till bilagor i Zotero-rapporten
+def filepath_to_uri(filepath):
+    # Omvandla Windows-sökväg till file:/// URI
+    path = Path(filepath).resolve()
+    # Ersätt bakåtsnedstreck med framåtsnedstreck
+    uri = path.as_uri()
+    return uri
+
 # Generera Zotero RIS-export
 def generate_zotero_export(results, output_path):
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
@@ -244,6 +253,8 @@ def generate_zotero_export(results, output_path):
         ris_type = type_map.get(item.get("type", ""), "GEN")
         lines.append(f"TY  - {ris_type}")
         lines.append(f"TI  - {item.get('title', 'Utan titel')}")
+        if item.get("filepath"):
+            lines.append(f"L1  - {filepath_to_uri(item['filepath'])}")
 
         author = item.get("author", "Okänd")
         for a in author.split(";"):
