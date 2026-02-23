@@ -15,3 +15,6 @@ extensions:
 anthropic:
   model: claude-sonnet-4-6
   max_tokens: 1000
+
+# Om författare inte kan extraheras, använd detta som standard
+default_author: "Lars Gunther"

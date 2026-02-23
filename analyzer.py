@@ -69,7 +69,7 @@ def check_file_locked(filepath):
         return True
 
 # Analysera dokument med Claude
-def analyze_document(client, model, max_tokens, filepath, content):
+def analyze_document(client, model, max_tokens, filepath, content, default_author=""):
     prompt = f"""Analysera följande dokument och svara ENDAST med ett JSON-objekt i detta exakta format (inga kommentarer, inga markdown-kodblock):
 {{
   "title": "dokumentets titel eller ett beskrivande namn om titel saknas",
@@ -108,7 +108,10 @@ Dokumentets innehåll (kan vara avkortat):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
             raw = raw[4:]
-    return json.loads(raw.strip())
+    result = json.loads(raw.strip())
+    if default_author and result.get("author", "").lower() in ("okänd", "unknown", ""):
+        result["author"] = default_author
+    return result
 
 # Hitta alla filer att processa
 def find_files(folders, extensions, log):
@@ -300,6 +303,9 @@ def main():
 
     config = load_config()
 
+    # Använd default_author från config
+    default_author = config.get("default_author", "Okänd")
+
     # Överskrid config om --folder angivits
     if args.folder:
         config["folders"] = [str(Path(args.folder).resolve())]
@@ -342,7 +348,7 @@ def main():
             continue
 
         try:
-            analysis = analyze_document(client, model, max_tokens, filepath, content)
+            analysis = analyze_document(client, model, max_tokens, filepath, content, default_author)
             analysis["filepath"] = filepath
             results.append(analysis)
 
