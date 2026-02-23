@@ -74,8 +74,24 @@ python analyzer.py
 
 # Analysera specifik mapp
 python analyzer.py --folder /sökväg/till/mapp
+
+# Analysera utan att skapa Zotero-fil
+python analyzer.py --noris
+
+# Radera logg och analysera allt från scratch
+python analyzer.py --refresh
+
+# Kombinera flaggor
+python analyzer.py --folder /sökväg/till/mapp --refresh --noris
 ```
 
+### Flaggor
+
+`--folder` – Anger mapp att analysera, överskriver config.yaml.  
+`--noris` – Hoppar över skapandet av Zotero RIS-exportfil.  
+`--refresh` – Raderar loggfilen och analyserar alla filer från scratch.
+
+### Resultaten
 Resultaten sparas i en `analyzer`-mapp inuti den analyserade katalogen:
 - `analys-[mappnamn].docx` – Word-rapport
 - `zotero_import_[mappnamn].ris` – Zotero-importfil
