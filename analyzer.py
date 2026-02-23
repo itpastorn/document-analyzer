@@ -294,6 +294,8 @@ def main():
     # Hantera kommandoradsargument
     parser = argparse.ArgumentParser(description="Analysera dokument i en mapp")
     parser.add_argument("--folder", type=str, help="Mapp att analysera (överskriver config.yaml)")
+    parser.add_argument("--noris", action="store_true", help="Skapa ingen Zotero RIS-fil")
+    parser.add_argument("--refresh", action="store_true", help="Radera loggen och analysera allt från scratch")
     args = parser.parse_args()
 
     config = load_config()
@@ -306,6 +308,13 @@ def main():
     folder_name = Path(config["folders"][0]).name
     base_output = Path(config["folders"][0]) / "analyzer"
     log_path = str(base_output / "processed_files.json")
+    if args.refresh:
+        if Path(log_path).exists():
+            Path(log_path).unlink()
+            print("Logg raderad - analyserar allt från scratch.")
+        log = {}
+    else:
+        log = load_log(log_path)
     report_path = str(base_output / f"analys-{folder_name}.docx")
     zotero_path = str(base_output / f"zotero_import_{folder_name}.ris")
 
@@ -360,7 +369,9 @@ def main():
     print(f"Totalt i rapport: {len(all_results)} dokument.")
 
     generate_word_report(all_results, report_path, folder_name)
-    generate_zotero_export(all_results, zotero_path)
+    generate_word_report(all_results, report_path, folder_name)
+    if not args.noris:
+        generate_zotero_export(all_results, zotero_path)
 
 if __name__ == "__main__":
     main()
