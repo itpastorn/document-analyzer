@@ -6,7 +6,7 @@ importfil.
 
 ## Funktioner
 
-- Stöder PDF, DOCX, TXT, RTF och PowerPoint (PPT, PPTX)
+- Stöder PDF, DOCX, TXT, RTF, PowerPoint (PPT, PPTX) och OpenDocument (ODT, ODP, SDW)
 - Extraherar författare, titel, år och sammanfattning för varje dokument
 - Hämtar metadata anpassad efter dokumenttyp (artikel, bok, uppsats m.m.)
 - Genererar en Word-rapport grupperad efter dokumenttyp
@@ -46,7 +46,7 @@ Säkerhetscenter under *Inställningar för filblockering* om det behövs.
 
 - Python 3.12+
 - Anthropic API-nyckel
-- LibreOffice (valfritt, för vissa konverteringar)
+- LibreOffice – krävs för SDW och som fallback för ODT/ODP. Ange sökvägen i `config.yaml` under `libreoffice_path`.
 
 ## Installation
 ```bash
@@ -173,7 +173,7 @@ document-analyzer/
 ├── analyzer.py               # Huvudskript för dokumentanalys
 ├── convert-sam-to-docx.py    # Konverterar Ami Pro .SAM till DOCX
 ├── convert-doc-to-docx.ps1   # Konverterar gamla .DOC till DOCX
-├── config.yaml               # Konfiguration
+├── config.yaml               # Konfiguration inkl. mappar, filformat och LibreOffice-sökväg
 ├── requirements.txt          # Python-beroenden
 ├── .env                      # API-nyckel (ignoreras av Git)
 └── [analyserad mapp]/
