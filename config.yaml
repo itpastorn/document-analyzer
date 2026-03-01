@@ -10,6 +10,9 @@ extensions:
   - .rtf
   - .ppt
   - .pptx
+  - .odt
+  - .odp
+  - .sdw
 
 # Claude-modell
 anthropic:
@@ -18,3 +21,6 @@ anthropic:
 
 # Om författare inte kan extraheras, använd detta som standard
 default_author: "Gunther, Lars" 
+
+# Sökväg till LibreOffice (för SDW och fallback)
+libreoffice_path: "C:/Program Files/LibreOffice/program/soffice.exe"

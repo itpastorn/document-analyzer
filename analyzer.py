@@ -29,17 +29,35 @@ def save_log(log_path, log_data):
     with open(log_path, "w", encoding="utf-8") as f:
         json.dump(log_data, f, ensure_ascii=False, indent=2)
 
+# LireOffice-extraktion som fallback för ODT/ODP/SDW eller när odfpy misslyckas
+def _libreoffice_extract(filepath, config):
+    import subprocess
+    import tempfile
+    lo_path = config.get("libreoffice_path", "soffice")
+    with tempfile.TemporaryDirectory() as tmpdir:
+        result = subprocess.run(
+            [lo_path, "--headless", "--convert-to", "txt:Text", "--outdir", tmpdir, filepath],
+            capture_output=True, text=True, timeout=30
+        )
+        txt_file = Path(tmpdir) / (Path(filepath).stem + ".txt")
+        if txt_file.exists():
+            with open(txt_file, "r", encoding="utf-8", errors="ignore") as f:
+                return f.read()
+    return None
+
 # Läs textinnehåll från fil
-def read_file(filepath):
+def read_file(filepath, config=None):
     suffix = Path(filepath).suffix.lower()
     try:
         if suffix == ".txt":
             with open(filepath, "r", encoding="utf-8", errors="ignore") as f:
                 return f.read()
+        
         elif suffix == ".docx":
             from docx import Document
             doc = Document(filepath)
             return "\n".join([p.text for p in doc.paragraphs])
+        
         elif suffix in (".ppt", ".pptx"):
             from pptx import Presentation
             prs = Presentation(filepath)
@@ -49,6 +67,31 @@ def read_file(filepath):
                     if hasattr(shape, "text") and shape.text.strip():
                         texts.append(shape.text)
             return "\n".join(texts)
+        
+        elif suffix == ".odt":
+            try:
+                from odf import text, teletype
+                from odf.opendocument import load as odf_load
+                doc = odf_load(filepath)
+                return teletype.extractText(doc.text)
+            except Exception:
+                return _libreoffice_extract(filepath, config)
+
+        elif suffix == ".odp":
+            try:
+                from odf import draw, teletype
+                from odf.opendocument import load as odf_load
+                doc = odf_load(filepath)
+                texts = []
+                for frame in doc.presentation.getElementsByType(draw.Frame):
+                    texts.append(teletype.extractText(frame))
+                return "\n".join(texts)
+            except Exception:
+                return _libreoffice_extract(filepath, config)
+
+        elif suffix == ".sdw":
+            return _libreoffice_extract(filepath, config)
+        
         elif suffix == ".pdf":
             from pypdf import PdfReader
             reader = PdfReader(filepath)
@@ -353,7 +396,7 @@ def main():
         filename = Path(filepath).name
         print(f"[{i}/{len(files)}] Analyserar: {filename}")
 
-        content = read_file(filepath)
+        content = read_file(filepath, config)
         if not content or len(content.strip()) < 50:
             print(f"  Hoppar över – tomt eller oläsbart innehåll")
             continue
