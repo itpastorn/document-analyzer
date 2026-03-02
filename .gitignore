@@ -13,3 +13,6 @@ logs/
 # Dropbox-specifikt
 .dropbox
 desktop.ini
+
+# Privata anteckningar
+notes.md
