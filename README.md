@@ -1,8 +1,8 @@
 # Document Analyzer
 
-En agent som rekursivt genomsöker mappar med dokument, analyserar innehållet
-med hjälp av Claude AI och genererar en Word-rapport samt en Zotero-kompatibel
-importfil.
+## Syfte
+
+Rekursivt genomsöker mappar med dokument, analyserar innehållet med hjälp av Claude AI och genererar en Word-rapport samt en Zotero-kompatibel importfil.
 
 ## Funktioner
 
@@ -166,6 +166,20 @@ Navigera till den mapp du vill analysera och kör:
 cd /sökväg/till/mapp
 analyze
 ```
+
+## Beroenden
+
+Se `requirements.txt` för fullständig lista (25 paket). Centrala bibliotek:
+
+- [`anthropic`](https://github.com/anthropic/anthropic-sdk-python) – Claude AI-analys
+- [`python-docx`](https://python-docx.readthedocs.io/) – Word-rapport
+- [`pdfplumber`](https://github.com/jsvine/pdfplumber) – PDF-textextraktion
+- [`pyyaml`](https://pyyaml.org/) – konfigurationsfil
+- [`python-dotenv`](https://saurabh-kumar.com/python-dotenv/) – `.env`-hantering
+
+Kräver dessutom: Python 3.12+, Anthropic API-nyckel, LibreOffice (för SDW/ODT).
+
+---
 
 ## Projektstruktur
 ```
