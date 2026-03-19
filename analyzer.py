@@ -70,8 +70,8 @@ def read_file(filepath, config=None):
         
         elif suffix == ".odt":
             try:
-                from odf import text, teletype
-                from odf.opendocument import load as odf_load
+                from odf import text, teletype  # type: ignore[import-untyped]
+                from odf.opendocument import load as odf_load  # type: ignore[import-untyped]
                 doc = odf_load(filepath)
                 return teletype.extractText(doc.text)  # type: ignore[union-attr]
             except Exception:
@@ -79,8 +79,8 @@ def read_file(filepath, config=None):
 
         elif suffix == ".odp":
             try:
-                from odf import draw, teletype
-                from odf.opendocument import load as odf_load
+                from odf import draw, teletype  # type: ignore[import-untyped]
+                from odf.opendocument import load as odf_load  # type: ignore[import-untyped]
                 doc = odf_load(filepath)
                 texts = []
                 for frame in doc.presentation.getElementsByType(draw.Frame):  # type: ignore[union-attr]
@@ -339,6 +339,10 @@ def generate_zotero_export(results, output_path):
 
         lines.append("ER  - ")
         lines.append("")
+
+    if not citable:
+        print("Inga citeringsbara poster – RIS-fil skapas inte.")
+        return
 
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
