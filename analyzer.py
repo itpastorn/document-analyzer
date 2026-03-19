@@ -64,8 +64,8 @@ def read_file(filepath, config=None):
             texts = []
             for slide in prs.slides:
                 for shape in slide.shapes:
-                    if hasattr(shape, "text") and shape.text.strip():
-                        texts.append(shape.text)
+                    if shape.has_text_frame and shape.text_frame.text.strip():  # type: ignore[union-attr]
+                        texts.append(shape.text_frame.text)  # type: ignore[union-attr]
             return "\n".join(texts)
         
         elif suffix == ".odt":
@@ -73,7 +73,7 @@ def read_file(filepath, config=None):
                 from odf import text, teletype
                 from odf.opendocument import load as odf_load
                 doc = odf_load(filepath)
-                return teletype.extractText(doc.text)
+                return teletype.extractText(doc.text)  # type: ignore[union-attr]
             except Exception:
                 return _libreoffice_extract(filepath, config)
 
@@ -83,7 +83,7 @@ def read_file(filepath, config=None):
                 from odf.opendocument import load as odf_load
                 doc = odf_load(filepath)
                 texts = []
-                for frame in doc.presentation.getElementsByType(draw.Frame):
+                for frame in doc.presentation.getElementsByType(draw.Frame):  # type: ignore[union-attr]
                     texts.append(teletype.extractText(frame))
                 return "\n".join(texts)
             except Exception:

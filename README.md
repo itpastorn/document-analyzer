@@ -16,9 +16,29 @@ Rekursivt genomsöker mappar med dokument, analyserar innehållet med hjälp av 
 
 ## Hjälpskript
 
+### Sortera RIS-filer
+
+Sorterar en RIS-fil efter författare, datum och titel. Skriver resultatet
+till `[originalnamn]-sorted.ris` – originalfilen rörs inte.
+
+```bash
+# Angiven fil
+python "$ANALYZER_HOME/ris-sort.py" mina-referenser.ris
+
+# Enda .ris-filen i aktuell mapp
+python "$ANALYZER_HOME/ris-sort.py"
+```
+
+Alias-förslag för `.bashrc`:
+
+```bash
+alias ris-sort='python "$ANALYZER_HOME/ris-sort.py"'
+```
+
 ### Konvertera Ami Pro (.SAM) till DOCX
 
 Äldre dokument i Ami Pro-format kan konverteras med:
+
 ```bash
 # En enskild fil
 python "$ANALYZER_HOME/convert-sam-to-docx.py" filnamn.SAM
@@ -49,6 +69,7 @@ Säkerhetscenter under *Inställningar för filblockering* om det behövs.
 - LibreOffice – krävs för SDW och som fallback för ODT/ODP. Ange sökvägen i `config.yaml` under `libreoffice_path`.
 
 ## Installation
+
 ```bash
 git clone https://github.com/itpastorn/document-analyzer.git
 cd document-analyzer
@@ -58,7 +79,8 @@ pip install -r requirements.txt
 ```
 
 Skapa en `.env`-fil i projektmappen:
-```
+
+```text
 ANTHROPIC_API_KEY=din-nyckel-här
 ```
 
@@ -68,6 +90,7 @@ Redigera `config.yaml` för grundinställningar. Mappar kan anges antingen
 i `config.yaml` eller direkt via `--folder`-argumentet vid körning.
 
 ## Användning
+
 ```bash
 # Analysera mapp angiven i config.yaml
 python analyzer.py
@@ -87,12 +110,14 @@ python analyzer.py --folder /sökväg/till/mapp --refresh --noris
 
 ### Flaggor
 
-`--folder` – Anger mapp att analysera, överskriver config.yaml.  
-`--noris` – Hoppar över skapandet av Zotero RIS-exportfil.  
+`--folder` – Anger mapp att analysera, överskriver config.yaml.
+`--noris` – Hoppar över skapandet av Zotero RIS-exportfil.
 `--refresh` – Raderar loggfilen och analyserar alla filer från scratch.
 
 ### Resultaten
+
 Resultaten sparas i en `analyzer`-mapp inuti den analyserade katalogen:
+
 - `analys-[mappnamn].docx` – Word-rapport
 - `zotero_import_[mappnamn].ris` – Zotero-importfil
 - `processed_files.json` – logg över analyserade filer
@@ -108,12 +133,14 @@ i terminalen från den mapp du vill analysera.
 ### Git Bash (Windows)
 
 Lägg till följande i `~/.bashrc` eller `~/.bash_profile`:
+
 ```bash
 export ANALYZER_HOME="/c/Users/username/path/to/document-analyzer"
 alias analyze='source "$ANALYZER_HOME/.venv/Scripts/activate" && python "$ANALYZER_HOME/analyzer.py" --folder "$(pwd)"'
 ```
 
 Aktivera direkt utan att starta om terminalen:
+
 ```bash
 source ~/.bashrc
 ```
@@ -121,12 +148,14 @@ source ~/.bashrc
 ### Terminal (Linux)
 
 Lägg till följande i `~/.bashrc`:
+
 ```bash
 export ANALYZER_HOME="$HOME/path/to/document-analyzer"
 alias analyze='source "$ANALYZER_HOME/.venv/bin/activate" && python "$ANALYZER_HOME/analyzer.py" --folder "$(pwd)"'
 ```
 
 Aktivera:
+
 ```bash
 source ~/.bashrc
 ```
@@ -134,12 +163,14 @@ source ~/.bashrc
 ### Terminal (Mac)
 
 Lägg till följande i `~/.zshrc`:
+
 ```bash
 export ANALYZER_HOME="$HOME/path/to/document-analyzer"
 alias analyze='source "$ANALYZER_HOME/.venv/bin/activate" && python "$ANALYZER_HOME/analyzer.py" --folder "$(pwd)"'
 ```
 
 Aktivera:
+
 ```bash
 source ~/.zshrc
 ```
@@ -147,11 +178,13 @@ source ~/.zshrc
 ### PowerShell (Windows)
 
 Öppna din profil med:
+
 ```powershell
 notepad $PROFILE
 ```
 
 Lägg till:
+
 ```powershell
 $env:ANALYZER_HOME = "C:\Users\username\path\to\document-analyzer"
 function analyze { python "$env:ANALYZER_HOME\analyzer.py" --folder (Get-Location) }
@@ -162,6 +195,7 @@ Starta om PowerShell för att aktivera.
 ### Användning efter uppsättning
 
 Navigera till den mapp du vill analysera och kör:
+
 ```bash
 cd /sökväg/till/mapp
 analyze
@@ -182,9 +216,11 @@ Kräver dessutom: Python 3.12+, Anthropic API-nyckel, LibreOffice (för SDW/ODT)
 ---
 
 ## Projektstruktur
-```
+
+```text
 document-analyzer/
 ├── analyzer.py               # Huvudskript för dokumentanalys
+├── ris-sort.py               # Sorterar RIS-filer
 ├── convert-sam-to-docx.py    # Konverterar Ami Pro .SAM till DOCX
 ├── convert-doc-to-docx.ps1   # Konverterar gamla .DOC till DOCX
 ├── config.yaml               # Konfiguration inkl. mappar, filformat och LibreOffice-sökväg
