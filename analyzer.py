@@ -376,7 +376,7 @@ def main():
     else:
         log = load_log(log_path)
     report_path = str(base_output / f"analys-{folder_name}.docx")
-    zotero_path = str(base_output / f"zotero_import_{folder_name}.ris")
+    zotero_path = str(base_output / f"zotero-import-{folder_name}.ris")
 
     log = load_log(log_path)
 
