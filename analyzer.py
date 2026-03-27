@@ -1,4 +1,3 @@
-import os
 import json
 import yaml
 from pathlib import Path
@@ -160,16 +159,16 @@ Dokumentets innehåll (kan vara avkortat):
 def find_files(folders, extensions, log):
     files = []
     for folder in folders:
-        for root, dirs, filenames in os.walk(folder):
-            # Hoppa över analyzer-mappar
-            dirs[:] = [d for d in dirs if d != "analyzer"]
-            for filename in filenames:
-                filepath = str(Path(root) / filename)
-                if Path(filepath).suffix.lower() in extensions:
-                    if filepath not in log:
-                        files.append(filepath)
-                    else:
-                        print(f"  Hoppar över (redan processad): {filename}")
+        for entry in Path(folder).iterdir():
+            if not entry.is_file():
+                continue
+            if entry.suffix.lower() not in extensions:
+                continue
+            filepath = str(entry)
+            if filepath not in log:
+                files.append(filepath)
+            else:
+                print(f"  Hoppar över (redan processad): {entry.name}")
     return files
 
 # Generera Word-rapport

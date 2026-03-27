@@ -2,7 +2,7 @@
 
 ## Syfte
 
-Rekursivt genomsöker mappar med dokument, analyserar innehållet med hjälp av Claude AI och genererar en Word-rapport samt en Zotero-kompatibel importfil.
+Genomsöker en mapp med dokument (ej rekursivt), analyserar innehållet med hjälp av Claude AI och genererar en Word-rapport samt en Zotero-kompatibel importfil.
 
 ## Funktioner
 
