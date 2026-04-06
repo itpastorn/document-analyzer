@@ -4,6 +4,7 @@ folders:
 
 # Filformat att behandla
 extensions:
+  - .epub
   - .pdf
   - .docx
   - .txt

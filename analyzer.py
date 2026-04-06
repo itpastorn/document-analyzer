@@ -91,6 +91,22 @@ def read_file(filepath, config=None):
         elif suffix == ".sdw":
             return _libreoffice_extract(filepath, config)
         
+        elif suffix == ".epub":
+            try:
+                import ebooklib
+                from ebooklib import epub
+                from bs4 import BeautifulSoup
+            except ImportError as exc:
+                raise RuntimeError(
+                    "Saknade paket för epub: kör '.venv/Scripts/pip install ebooklib beautifulsoup4'"
+                ) from exc
+            book = epub.read_epub(str(filepath))
+            texts = []
+            for item in book.get_items_of_type(ebooklib.ITEM_DOCUMENT):
+                soup = BeautifulSoup(item.get_content(), "html.parser")
+                texts.append(soup.get_text())
+            return "\n".join(texts)
+
         elif suffix == ".pdf":
             from pypdf import PdfReader
             reader = PdfReader(filepath)
@@ -155,21 +171,32 @@ Dokumentets innehåll (kan vara avkortat):
         result["author"] = default_author
     return result
 
-# Hitta alla filer att processa
+# Filformat sorterade efter prioritet vid val av analyskälla
+_ANALYSIS_PRIORITY = {".epub": 0, ".pdf": 1}
+
+# Hitta alla filer att processa, grupperade per stam (t.ex. bok.epub + bok.pdf = en grupp)
+# Returnerar lista av grupper; varje grupp är en lista av sökvägar sorterade efter prioritet.
 def find_files(folders, extensions, log):
-    files = []
+    from collections import defaultdict
+    groups = []
     for folder in folders:
+        by_stem = defaultdict(list)
         for entry in Path(folder).iterdir():
             if not entry.is_file():
                 continue
             if entry.suffix.lower() not in extensions:
                 continue
-            filepath = str(entry)
-            if filepath not in log:
-                files.append(filepath)
-            else:
-                print(f"  Hoppar över (redan processad): {entry.name}")
-    return files
+            by_stem[entry.stem.lower()].append(entry)
+
+        for _stem, entries in by_stem.items():
+            entries.sort(key=lambda e: (_ANALYSIS_PRIORITY.get(e.suffix.lower(), 99), e.name))
+            group = [str(e) for e in entries]
+            already_logged = [p for p in group if p in log]
+            if already_logged:
+                print(f"  Hoppar över (redan processad): {' + '.join(Path(p).name for p in group)}")
+                continue
+            groups.append(group)
+    return groups
 
 # Generera Word-rapport
 def generate_word_report(results, output_path, folder_name=""):
@@ -231,8 +258,11 @@ def generate_word_report(results, output_path, folder_name=""):
                 ins = doc.add_paragraph(f"Lärosäte: {inst_str}")
                 ins.runs[0].italic = True
 
-            # Filnamn
-            fn = doc.add_paragraph(f"Fil: {Path(item['filepath']).name}")
+            # Filnamn – visa alla filer om flera ingår i gruppen
+            all_paths = item.get("all_filepaths") or [item.get("filepath", "")]
+            fn_label = "Filer" if len(all_paths) > 1 else "Fil"
+            fn_names = " + ".join(Path(p).name for p in all_paths)
+            fn = doc.add_paragraph(f"{fn_label}: {fn_names}")
             fn.runs[0].font.size = Pt(9)
             fn.runs[0].font.color.rgb = RGBColor(128, 128, 128)
 
@@ -349,6 +379,46 @@ def generate_zotero_export(results, output_path):
     print(f"Zotero RIS-fil sparad: {output_path} ({len(citable)} poster)")
 
 
+# Ta bort loggposter för filer som inte längre finns
+def cleanup_missing_files(log):
+    # Hitta alla primära poster (de som har en fullständig analys)
+    primaries = {k: v for k, v in log.items() if "analysis" in v}
+    removed_groups = 0
+    removed_files = 0
+
+    for primary_path, entry in list(primaries.items()):
+        all_paths = entry["analysis"].get("all_filepaths") or [primary_path]
+
+        # Kontrollera vilka filer i gruppen som saknas
+        missing = [p for p in all_paths if not Path(p).exists()]
+        existing = [p for p in all_paths if Path(p).exists()]
+
+        if not existing or not Path(primary_path).exists():
+            # Primärfilen saknas – ta bort hela gruppen
+            for p in all_paths:
+                if p in log:
+                    del log[p]
+                    removed_files += 1
+            removed_groups += 1
+            print(f"  Borttagen (saknas): {' + '.join(Path(p).name for p in all_paths)}")
+        elif missing:
+            # Sekundära filer saknas – uppdatera all_filepaths och ta bort deras loggposter
+            entry["analysis"]["all_filepaths"] = existing
+            # Om RIS-filepath pekade på en saknad fil, välj ny
+            if entry["analysis"].get("filepath") not in existing:
+                pdf_paths = [p for p in existing if Path(p).suffix.lower() == ".pdf"]
+                entry["analysis"]["filepath"] = pdf_paths[0] if pdf_paths else existing[0]
+            for p in missing:
+                if p in log:
+                    del log[p]
+                    removed_files += 1
+            print(f"  Uppdaterad (saknade filer borttagna): {' + '.join(Path(p).name for p in missing)}")
+
+    if removed_files:
+        print(f"Rensning klar: {removed_groups} grupp(er) raderade, {removed_files} filpost(er) borttagna.")
+    return log
+
+
 # Huvudfunktion
 def main():
     # Hantera kommandoradsargument
@@ -383,6 +453,11 @@ def main():
 
     log = load_log(log_path)
 
+    # Rensa bort poster för filer som inte längre finns
+    print(f"Kontrollerar saknade filer...")
+    log = cleanup_missing_files(log)
+    save_log(log_path, log)
+
     client = anthropic.Anthropic()
     model = config["anthropic"]["model"]
     max_tokens = config["anthropic"]["max_tokens"]
@@ -390,31 +465,39 @@ def main():
     print(f"Startar analys: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"Redan processade filer: {len(log)}")
 
-    files = find_files(config["folders"], config["extensions"], log)
-    print(f"Nya filer att processa: {len(files)}\n")
+    file_groups = find_files(config["folders"], config["extensions"], log)
+    print(f"Nya grupper att processa: {len(file_groups)}\n")
 
     results = []
 
-    for i, filepath in enumerate(files, 1):
-        filename = Path(filepath).name
-        print(f"[{i}/{len(files)}] Analyserar: {filename}")
+    for i, group in enumerate(file_groups, 1):
+        label = " + ".join(Path(p).name for p in group)
+        print(f"[{i}/{len(file_groups)}] Analyserar: {label}")
 
-        content = read_file(filepath, config)
+        # Läs från första filen i gruppen (epub > pdf per prioritetssortering)
+        primary = group[0]
+        content = read_file(primary, config)
         if not content or len(content.strip()) < 50:
             print(f"  Hoppar över – tomt eller oläsbart innehåll")
             continue
 
         try:
-            analysis = analyze_document(client, model, max_tokens, filepath, content, default_author)
-            analysis["filepath"] = filepath
+            analysis = analyze_document(client, model, max_tokens, primary, content, default_author)
+            analysis["all_filepaths"] = group
+            # RIS-posten ska peka på PDF om sådan finns, annars primary
+            pdf_paths = [p for p in group if Path(p).suffix.lower() == ".pdf"]
+            analysis["filepath"] = pdf_paths[0] if pdf_paths else primary
             results.append(analysis)
 
-            log[filepath] = {
+            log[primary] = {
                 "processed": datetime.now().isoformat(),
                 "title": analysis.get("title"),
                 "author": analysis.get("author"),
-                "analysis": analysis
+                "analysis": analysis,
             }
+            # Markera även övriga filer i gruppen som processade
+            for p in group[1:]:
+                log[p] = {"processed": datetime.now().isoformat(), "primary": primary}
             save_log(log_path, log)
             print(f"  ✓ {analysis.get('author', 'Okänd')} – {analysis.get('title', 'Utan titel')}")
 
@@ -425,13 +508,12 @@ def main():
 
     # Bygg lista med alla resultat - nya + tidigare analyserade
     all_results = []
-    for filepath, entry in log.items():
+    for _, entry in log.items():
         if "analysis" in entry:
             all_results.append(entry["analysis"])
 
     print(f"Totalt i rapport: {len(all_results)} dokument.")
 
-    generate_word_report(all_results, report_path, folder_name)
     generate_word_report(all_results, report_path, folder_name)
     if not args.noris:
         generate_zotero_export(all_results, zotero_path)
