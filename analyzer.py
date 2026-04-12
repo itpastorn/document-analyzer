@@ -1,10 +1,23 @@
 import json
+import re
+import sys
 import yaml
 from pathlib import Path
 from datetime import datetime
 from dotenv import load_dotenv
 import anthropic
 import argparse
+
+_VALID_NAME = re.compile(r"^[a-zA-Z0-9.\-]+$")
+
+# Kontrollera att alla filer i mappen följer namnreglerna
+def validate_filenames(folder):
+    invalid = [e.name for e in Path(folder).iterdir() if e.is_file() and not _VALID_NAME.match(e.name)]
+    if invalid:
+        print(f"⚠️  Följande filer i {folder} följer inte namnreglerna (endast a-zA-Z0-9, bindestreck och punkt tillåts):")
+        for name in invalid:
+            print(f"   {name}")
+        sys.exit(1)
 
 # Ladda API-nyckel från .env
 load_dotenv(Path(__file__).parent / ".env")
@@ -436,6 +449,10 @@ def main():
     # Överskrid config om --folder angivits
     if args.folder:
         config["folders"] = [str(Path(args.folder).resolve())]
+
+    # Validera filnamn i alla mappar innan något annat körs
+    for folder in config["folders"]:
+        validate_filenames(folder)
 
     # Definiera alla sökvägar tidigt
     folder_name = Path(config["folders"][0]).name
