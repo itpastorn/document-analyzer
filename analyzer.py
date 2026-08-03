@@ -8,6 +8,11 @@ from dotenv import load_dotenv
 import anthropic
 import argparse
 
+# Windows använder cp1252 som stdout-kodning när utdata omdirigeras till fil
+# eller pipe – tvinga UTF-8 så att ✓, ✗ och åäö inte kraschar utskrifterna
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
+
 _VALID_NAME = re.compile(r"^[a-zA-Z0-9.\-]+$")
 
 # Kontrollera att alla filer i mappen följer namnreglerna
@@ -172,9 +177,15 @@ Dokumentets innehåll (kan vara avkortat):
     message = client.messages.create(
         model=model,
         max_tokens=max_tokens,
+        thinking={"type": "disabled"},
         messages=[{"role": "user", "content": prompt}]
     )
-    raw = message.content[0].text.strip()
+    # Svaret kan innehålla flera block (t.ex. thinking) – plocka texten
+    raw = "".join(b.text for b in message.content if b.type == "text").strip()
+    if not raw:
+        raise ValueError(f"Claude returnerade ingen text (stop_reason: {message.stop_reason})")
+    if message.stop_reason == "max_tokens":
+        raise ValueError("Svaret klipptes av – öka max_tokens i config.yaml")
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):

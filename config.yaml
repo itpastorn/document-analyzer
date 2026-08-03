@@ -17,7 +17,7 @@ extensions:
 
 # Claude-modell
 anthropic:
-  model: claude-sonnet-4-6
+  model: claude-sonnet-5
   max_tokens: 1000
 
 # Om författare inte kan extraheras, använd detta som standard
