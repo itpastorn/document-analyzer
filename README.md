@@ -16,6 +16,27 @@ Genomsöker en mapp med dokument (ej rekursivt), analyserar innehållet med hjä
 
 ## Hjälpskript
 
+### Analysera många mappar på en gång
+
+`analyze-all.sh` går rekursivt igenom ett mappträd och kör analysen där den behövs:
+
+```bash
+# Från aktuell mapp
+./analyze-all.sh
+
+# Angiven mapp, visa bara vad som skulle göras
+./analyze-all.sh --folder /sökväg/till/mapp --dry-run
+```
+
+Två saker utlöser analys:
+
+1. **En `needs-analysis`-fil i mappen** – mappen analyseras och märkfilen raderas
+   efteråt. Misslyckas analysen behålls filen. Ligger `needs-analysis` i en mapp
+   som redan har en `analyzer`-undermapp är den ett misstag: den raderas utan att
+   analys körs.
+2. **Nyare filer än loggen** – finns en `analyzer/processed_files.json` och någon
+   fil i mappen är nyare än den, körs analysen om.
+
 ### Sortera RIS-filer
 
 Sorterar en RIS-fil efter författare, datum och titel. Skriver resultatet

@@ -21,6 +21,40 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+run_analysis() {
+    local dir="$1"
+    "$SCRIPT_DIR/.venv/Scripts/python" "$SCRIPT_DIR/analyzer.py" --folder "$dir"
+}
+
+# Mappar märkta med en needs-analysis-fil analyseras, sedan raderas märkfilen.
+# Ligger märkfilen i en mapp som redan har en analyzer-undermapp är den ett
+# misstag – då raderas den utan att analys körs.
+find "$folder" -type f -name "needs-analysis" | while read -r marker; do
+    parent=$(dirname "$marker")
+
+    if [ -d "$parent/analyzer" ]; then
+        if $dry_run; then
+            echo "Onödig needs-analysis i $parent raderas"
+        else
+            echo "Raderar onödig needs-analysis i $parent"
+            rm "$marker"
+        fi
+        continue
+    fi
+
+    if $dry_run; then
+        echo "Analys av $parent behövs (needs-analysis)"
+        continue
+    fi
+
+    echo "Analyserar $parent (needs-analysis)"
+    if run_analysis "$parent"; then
+        rm "$marker"
+    else
+        echo "Analys misslyckades, behåller needs-analysis i $parent" >&2
+    fi
+done
+
 find "$folder" -iname "processed_files.json" | while read -r file; do
     json_timestamp=$(stat -c "%Y" "$file")
     parent=$(dirname "$(dirname "$file")")
@@ -36,6 +70,6 @@ find "$folder" -iname "processed_files.json" | while read -r file; do
         echo "Analys av $parent behövs"
     else
         echo "Analyserar $parent"
-        "$SCRIPT_DIR/.venv/Scripts/python" "$SCRIPT_DIR/analyzer.py" --folder "$parent"
+        run_analysis "$parent"
     fi
 done
