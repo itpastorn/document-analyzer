@@ -7,8 +7,15 @@ Genomsöker en mapp med dokument (ej rekursivt), analyserar innehållet med hjä
 ## Funktioner
 
 - Stöder PDF, DOCX, TXT, RTF, PowerPoint (PPT, PPTX) och OpenDocument (ODT, ODP, SDW)
-- Extraherar författare, titel, år och sammanfattning för varje dokument
-- Hämtar metadata anpassad efter dokumenttyp (artikel, bok, uppsats m.m.)
+- Extraherar författare, redaktörer, titel, år och sammanfattning för varje dokument
+- Läser filmetadata (PDF, DOCX, PPTX, EPUB) och skickar den märkt till Claude
+  tillsammans med dokumentets början och slut
+- Anger aldrig arkivägaren som författare utan belägg i texten eller i
+  creator-/Author-metadata (`lastModifiedBy` räknas inte)
+- Känner igen AI-genererade dokument och utesluter dem ur Zotero-exporten
+- Analyserar om filer vars innehåll har ändrats (SHA-256), även om namnet är detsamma
+- Hanterar skiftlägesbyten i filnamn utan dubbla poster
+- Registrerar byte-identiska kopior och tomma eller oläsbara filer som åtgärdspunkter
 - Genererar en Word-rapport grupperad efter dokumenttyp
 - Exporterar en RIS-fil för import till Zotero
 - Sparar rapport och logg i en `analyzer`-mapp i den analyserade katalogen
@@ -110,6 +117,15 @@ ANTHROPIC_API_KEY=din-nyckel-här
 Redigera `config.yaml` för grundinställningar. Mappar kan anges antingen
 i `config.yaml` eller direkt via `--folder`-argumentet vid körning.
 
+- `archive_owner` – arkivägarens namn ('Efternamn, Förnamn'). Används bara för
+  att känna igen och spärra hans namn när belägg saknas. Hette tidigare
+  `default_author` och fylldes då i som författare för alla okända dokument,
+  vilket var orsaken till felaktiga författaruppgifter.
+- `anthropic.effort` – tankedjup (`low`, `medium`, `high`). Tomt värde stänger
+  av tänkandet.
+- `excerpt_head`, `excerpt_tail` – antal tecken från dokumentets början och
+  slut som skickas till Claude (standard 9000 och 3000).
+
 ## Användning
 
 ```bash
@@ -125,6 +141,15 @@ python analyzer.py --noris
 # Radera logg och analysera allt från scratch
 python analyzer.py --refresh
 
+# Analysera om en enskild fil
+python analyzer.py --force stone-james-r-overwhelming-scientific-consensus.pdf
+
+# Rätta äldre poster där arkivägaren angetts som författare
+python analyzer.py --recheck-owner
+
+# Se vad som skulle hända, utan API-anrop
+python analyzer.py --check
+
 # Kombinera flaggor
 python analyzer.py --folder /sökväg/till/mapp --refresh --noris
 ```
@@ -134,17 +159,58 @@ python analyzer.py --folder /sökväg/till/mapp --refresh --noris
 `--folder` – Anger mapp att analysera, överskriver config.yaml.
 `--noris` – Hoppar över skapandet av Zotero RIS-exportfil.
 `--refresh` – Raderar loggfilen och analyserar alla filer från scratch.
+`--force FIL [FIL ...]` – Analyserar angivna filer på nytt även om de inte ändrats.
+`--recheck-owner` – Analyserar om äldre poster (från före schemaversion 2) där
+arkivägaren eller ingen alls står som författare.
+`--check` – Visar vad som skulle göras (nya, ändrade, trasiga filer,
+dubbletter och filer som inte analyseras) utan att anropa Claude eller ändra något.
 
 ### Resultaten
 
 Resultaten sparas i en `analyzer`-mapp inuti den analyserade katalogen:
 
-- `analys-[mappnamn].docx` – Word-rapport
-- `zotero_import_[mappnamn].ris` – Zotero-importfil
-- `processed_files.json` – logg över analyserade filer
+- `analys-[mappnamn].docx` – Word-rapport, med åtgärdspunkter (dubbletter,
+  trasiga filer) och en lista över filer som inte analyserats (t.ex. bilder)
+- `zotero-import-[mappnamn].ris` – Zotero-importfil
+- `processed_files.json` – register över analyserade filer
 
-Vid upprepade körningar analyseras bara nya filer, men rapporten
+Vid upprepade körningar analyseras bara nya och ändrade filer, men rapporten
 regenereras alltid med allt innehåll.
+
+### Registret (`processed_files.json`)
+
+Nyckeln är filens fullständiga sökväg. Varje post har `role`, `processed`
+(tidpunkt) samt `size`, `mtime` och `sha256` för att upptäcka ändringar.
+
+| `role` | Betydelse | Övriga fält |
+|---|---|---|
+| `primary` | Analyserad fil | `schema_version`, `title`, `author`, `analysis` |
+| `secondary` | Samma verk som en primärpost: PDF bredvid EPUB, eller en byte-identisk kopia. Har ingen egen analys – läs primärpostens. | `primary`, `identical_bytes`, och för kopior `duplicate_of` |
+| `broken` | Tom eller oläsbar fil | `reason` |
+
+Poster från före schemaversion 2 saknar `role` och `schema_version`: en post med
+`analysis` är primär, en med `primary` är sekundär.
+
+`analysis` innehåller:
+
+| Fält | Innehåll |
+|---|---|
+| `title`, `summary` | Titel och svensk sammanfattning |
+| `author` | Upphovsmän, 'Efternamn, Förnamn' separerade med semikolon, eller `null` |
+| `editors` | Redaktörer, samma format, eller `null` |
+| `author_confidence`, `author_evidence` | `hög`/`medel`/`låg` och var uppgiften står |
+| `is_owner_authored` | Arkivägarens egen text |
+| `ai_generated`, `ai_signals` | `ja`/`misstänkt`/`nej` och vad som talar för det |
+| `type` | artikel, bok, tidskriftsnummer, utdrag, uppsats, avhandling, studie, predikan, föredrag, kursmaterial, dom, myndighetsdokument, anteckningar, AI-rapport, övrigt |
+| `year`, `year_source`, `date_full` | År, varifrån det kommer (`text`/`metadata`/`fildatum`/`okänd`) och exakt datum |
+| `publication` | Tidskrift, antologi eller serie som dokumentet ingår i |
+| `publisher`, `publisher_place`, `isbn`, `pages_total`, `edition` | Bokuppgifter |
+| `institution`, `institution_place`, `thesis_type` | Uppsatser och avhandlingar |
+| `is_citable` | Citerbar källa |
+| `filepath`, `all_filepaths` | Fil som RIS-posten länkar till (PDF om sådan finns) och alla filer i gruppen |
+
+I RIS-exporten blir redaktörer `ED` och författare `AU`. AI-genererade dokument
+utesluts, och misstänkt AI-genererade märks med nyckelord och `N1`.
 
 ## Köra från valfri mapp
 
@@ -250,6 +316,6 @@ document-analyzer/
 └── [analyserad mapp]/
     └── analyzer/             # Skapas automatiskt vid körning
         ├── analys-[mappnamn].docx
-        ├── zotero_import_[mappnamn].ris
+        ├── zotero-import-[mappnamn].ris
         └── processed_files.json
 ```
