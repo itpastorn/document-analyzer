@@ -482,7 +482,34 @@ def apply_guards(result, owner, ai_signals, owner_evidence):
                 result["author_confidence"] = "låg"
     return result
 
-def analyze_document(client, config, filepath, content, owner):
+# Tokenförbrukning per anrop – visar om systemprompten träffar cachen
+USAGE_FIELDS = ("input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "output_tokens")
+
+def log_usage(usage, totals=None):
+    counts = {f: getattr(usage, f, None) or 0 for f in USAGE_FIELDS}
+    print(f"  Tokens: in {counts['input_tokens']}, cache skriv {counts['cache_creation_input_tokens']}, "
+          f"cache läs {counts['cache_read_input_tokens']}, ut {counts['output_tokens']}")
+    if totals is not None:
+        totals["calls"] = totals.get("calls", 0) + 1
+        for f, n in counts.items():
+            totals[f] = totals.get(f, 0) + n
+
+def print_usage_summary(totals):
+    if not totals.get("calls"):
+        return
+    total_in = sum(totals.get(f, 0) for f in USAGE_FIELDS[:3])
+    read = totals.get("cache_read_input_tokens", 0)
+    share = f"{100 * read / total_in:.1f} %" if total_in else "–"
+    print(f"\nTokenförbrukning ({totals['calls']} anrop):")
+    print(f"  Indata ej cachad:  {totals.get('input_tokens', 0)}")
+    print(f"  Cache skriv:       {totals.get('cache_creation_input_tokens', 0)}")
+    print(f"  Cache läs:         {read}")
+    print(f"  Utdata:            {totals.get('output_tokens', 0)}")
+    print(f"  Andel indata från cache: {share}")
+
+# Bygger anropet till Claude. Returnerar parametrarna och det som apply_guards
+# behöver efteråt (sparas i batch-läget tills svaret kommer).
+def prepare_request(config, filepath, content, owner):
     anthropic_cfg = config["anthropic"]
     metadata_fields, ai_signals = read_metadata(filepath)
     excerpt = text_excerpt(
@@ -494,18 +521,32 @@ def analyze_document(client, config, filepath, content, owner):
     effort = anthropic_cfg.get("effort")
     if effort:
         output_config["effort"] = effort
-    message = client.messages.create(
-        model=anthropic_cfg["model"],
-        max_tokens=anthropic_cfg["max_tokens"],
-        thinking={"type": "adaptive"} if effort else {"type": "disabled"},
-        system=[{
+    params = {
+        "model": anthropic_cfg["model"],
+        "max_tokens": anthropic_cfg["max_tokens"],
+        # Sonnet 5.5 avvisar {"type": "disabled"} – between_tools stänger av tänkandet
+        "thinking": {"type": "adaptive"} if effort else {"type": "between_tools"},
+        "system": [{
             "type": "text",
             "text": build_system_prompt(owner),
             "cache_control": {"type": "ephemeral"},
         }],
-        messages=[{"role": "user", "content": build_user_prompt(filepath, excerpt, metadata_fields, ai_signals)}],
-        output_config=output_config,  # type: ignore[arg-type]
-    )
+        "messages": [{"role": "user", "content": build_user_prompt(filepath, excerpt, metadata_fields, ai_signals)}],
+        "output_config": output_config,
+    }
+    guard_context = {
+        "ai_signals": ai_signals,
+        "owner_evidence": has_owner_evidence(owner, excerpt, metadata_fields),
+    }
+    return params, guard_context
+
+def analyze_document(client, config, filepath, content, owner, usage_totals=None):
+    params, guard_context = prepare_request(config, filepath, content, owner)
+    message = client.messages.create(**params)
+    return parse_response(message, owner, guard_context, usage_totals)
+
+def parse_response(message, owner, guard_context, usage_totals=None):
+    log_usage(message.usage, usage_totals)
     if message.stop_reason == "refusal":
         raise ValueError("Claude avböjde att analysera dokumentet")
     if message.stop_reason == "max_tokens":
@@ -515,7 +556,7 @@ def analyze_document(client, config, filepath, content, owner):
     if not raw:
         raise ValueError(f"Claude returnerade ingen text (stop_reason: {message.stop_reason})")
     result = json.loads(raw)
-    return apply_guards(result, owner, ai_signals, has_owner_evidence(owner, excerpt, metadata_fields))
+    return apply_guards(result, owner, guard_context["ai_signals"], guard_context["owner_evidence"])
 
 
 # ---------------------------------------------------------------------------
@@ -675,6 +716,47 @@ def forget_changed(log, changed):
 # Filformat sorterade efter prioritet vid val av analyskälla
 _ANALYSIS_PRIORITY = {".epub": 0, ".pdf": 1}
 
+_CONVERTED_SUFFIX = re.compile(r"-converted$")
+
+# Filnamnsstam som identifierar verket: "bok-converted.pdf" är en konvertering av "bok.epub"
+def work_stem(path):
+    return _CONVERTED_SUFFIX.sub("", Path(path).stem.lower())
+
+# Slå ihop redan analyserade verk där en "-converted"-fil och dess original
+# fått varsin primärpost. Originalet (epub före pdf) behålls som primärpost;
+# den andra filen blir en sekundär post och försvinner därmed ur rapport och RIS.
+def merge_converted(log):
+    from collections import defaultdict
+    by_work = defaultdict(list)
+    for key, entry in log.items():
+        if entry_role(entry) == "primary":
+            by_work[(os.path.normcase(str(Path(key).parent)), work_stem(key))].append(key)
+
+    merged = 0
+    for keys in by_work.values():
+        if len(keys) < 2 or not any(Path(k).stem.lower().endswith("-converted") for k in keys):
+            continue
+        keys.sort(key=lambda k: (_ANALYSIS_PRIORITY.get(Path(k).suffix.lower(), 99),
+                                 Path(k).stem.lower().endswith("-converted"), k))
+        keep, *drop = keys
+        analysis = log[keep]["analysis"]
+        for key in drop:
+            old = log[key]
+            moved = list(old["analysis"].get("all_filepaths") or [key])
+            # Kopior som pekade på den borttagna primärposten pekar nu på den kvarvarande
+            _rename_key(log, key, keep)
+            files = analysis.setdefault("all_filepaths", [keep])
+            files.extend(p for p in moved if p not in files)
+            log[key] = {"role": "secondary", "primary": keep, "identical_bytes": False,
+                        **{f: old[f] for f in ("processed", "size", "mtime", "sha256") if f in old}}
+            print(f"  Sammanslagen (converted): {Path(key).name} → {Path(keep).name}")
+            merged += 1
+        # RIS-posten ska peka på PDF om sådan finns
+        pdf_paths = [p for p in analysis["all_filepaths"] if Path(p).suffix.lower() == ".pdf"]
+        if pdf_paths and Path(analysis.get("filepath", "")).suffix.lower() != ".pdf":
+            analysis["filepath"] = pdf_paths[0]
+    return merged
+
 # Filer som inte är dokument och inte behöver nämnas i rapporten
 _IGNORED_FILES = {"contents.md", "needs-analysis", "desktop.ini", "thumbs.db", ".dropbox"}
 
@@ -694,7 +776,8 @@ def find_files(folders, extensions, log):
                 continue
             if entry.suffix.lower() not in extensions:
                 continue
-            by_stem[entry.stem.lower()].append(entry)
+            # "bok-converted.pdf" är en konvertering av "bok.epub" och hör till samma verk
+            by_stem[work_stem(entry)].append(entry)
 
         for _stem, entries in by_stem.items():
             entries.sort(key=lambda e: (_ANALYSIS_PRIORITY.get(e.suffix.lower(), 99), e.name))
@@ -1005,6 +1088,113 @@ def owner_suspects(log, owner):
 def record(log, path, **fields):
     log[path] = {**fields, "processed": datetime.now().isoformat(), **fingerprint(path)}
 
+# Registrera ett analysresultat för en grupp; första filen är primary
+def store_analysis(log, analysis, group):
+    primary = group[0]
+    analysis["all_filepaths"] = group
+    # RIS-posten ska peka på PDF om sådan finns, annars primary
+    pdf_paths = [p for p in group if Path(p).suffix.lower() == ".pdf"]
+    analysis["filepath"] = pdf_paths[0] if pdf_paths else primary
+
+    record(log, primary, role="primary", schema_version=SCHEMA_VERSION,
+           title=analysis.get("title"), author=analysis.get("author"), analysis=analysis)
+    # Markera även övriga filer i gruppen som processade
+    for p in group[1:]:
+        record(log, p, role="secondary", primary=primary, identical_bytes=False)
+    flags = ""
+    if analysis.get("ai_generated") in ("ja", "misstänkt"):
+        flags = f"  [AI: {analysis['ai_generated']}]"
+    print(f"  ✓ {analysis.get('author') or 'Okänd'} – {analysis.get('title', 'Utan titel')}{flags}")
+
+# Registrera en grupp vars första fil är byte-identisk med en redan analyserad fil
+def store_duplicate(log, group, original):
+    print(f"  = Byte-identisk med {Path(original).name} – registreras som dubblett")
+    for p in group:
+        record(log, p, role="secondary", primary=original, duplicate_of=original,
+               identical_bytes=(p == group[0]))
+        log[original]["analysis"].setdefault("all_filepaths", [original]).append(p)
+
+
+# ---------------------------------------------------------------------------
+# Batch-läge (Message Batches API)
+# ---------------------------------------------------------------------------
+#
+# --batch skickar alla nya grupper i en batch till halva priset och sparar
+# batch-id i analyzer/pending-batch.json. Svaret kommer oftast inom en timme,
+# senast inom 24 timmar. Nästa körning, med eller utan --batch, hämtar
+# resultaten om batchen är klar och avslutas annars utan att göra något.
+
+def submit_batch(client, pending_path, batch_requests):
+    batch = client.messages.batches.create(requests=[
+        {"custom_id": cid, "params": req["params"]} for cid, req in batch_requests.items()
+    ])
+    pending = {
+        "batch_id": batch.id,
+        "submitted": datetime.now().isoformat(),
+        "requests": {cid: {k: v for k, v in req.items() if k != "params"}
+                     for cid, req in batch_requests.items()},
+    }
+    Path(pending_path).parent.mkdir(parents=True, exist_ok=True)
+    with open(pending_path, "w", encoding="utf-8") as f:
+        json.dump(pending, f, ensure_ascii=False, indent=2)
+    return batch.id
+
+# Hämtar resultaten om batchen är klar. Returnerar False om den fortfarande pågår.
+def collect_batch(client, pending_path, log, log_path, owner):
+    with open(pending_path, encoding="utf-8") as f:
+        pending = json.load(f)
+    requests = pending["requests"]
+    batch = client.messages.batches.retrieve(pending["batch_id"])
+    if batch.processing_status != "ended":
+        c = batch.request_counts
+        done = c.succeeded + c.errored + c.canceled + c.expired
+        print(f"Batch {batch.id} pågår: {done} av {len(requests)} klara "
+              f"(skickad {pending['submitted'][:16].replace('T', ' ')}).")
+        print("Inget nytt skickas förrän den är klar. Kör igen senare för att hämta resultaten.")
+        return False
+
+    print(f"Hämtar resultat från batch {batch.id}...")
+    usage_totals = {}
+    stored = 0
+    # Resultaten kommer i godtycklig ordning – matcha på custom_id
+    for item in client.messages.batches.results(batch.id):
+        req = requests.get(item.custom_id)
+        if req is None:
+            continue
+        group = req["group"]
+        print(f"[{item.custom_id}] {' + '.join(Path(p).name for p in group)}")
+        if not all(Path(p).exists() for p in group):
+            print("  ✗ Filen finns inte längre – resultatet används inte")
+            continue
+        result = item.result
+        if result.type == "succeeded":
+            try:
+                analysis = parse_response(result.message, owner, req["guard_context"], usage_totals)
+            except Exception as e:
+                print(f"  ✗ Fel vid analys: {e}")
+                continue
+            store_analysis(log, analysis, group)
+            for dup in req["duplicates"]:
+                store_duplicate(log, dup, group[0])
+            stored += 1
+        elif result.type == "errored":
+            err = result.error.error
+            hint = ("felaktigt anrop, rättas i koden" if err.type == "invalid_request_error"
+                    else "analyseras igen vid nästa körning")
+            print(f"  ✗ Fel ({err.type}): {err.message} – {hint}")
+        else:
+            # canceled eller expired
+            print(f"  ✗ {result.type} – analyseras igen vid nästa körning")
+
+    save_log(log_path, log)
+    Path(pending_path).unlink()
+    print(f"\n{stored} av {len(requests)} dokument hämtade från batchen.")
+    print_usage_summary(usage_totals)
+    if usage_totals:
+        print("  (Batchpris: hälften av ordinarie pris för alla tokens ovan.)")
+    print()
+    return True
+
 def main():
     # Hantera kommandoradsargument
     parser = argparse.ArgumentParser(description="Analysera dokument i en mapp")
@@ -1017,6 +1207,8 @@ def main():
                         help="Analysera om äldre poster där arkivägaren eller ingen alls står som författare")
     parser.add_argument("--check", action="store_true",
                         help="Visa vad som skulle göras, utan att anropa Claude eller ändra något")
+    parser.add_argument("--batch", action="store_true",
+                        help="Skicka nya dokument som batch till halva priset; resultaten hämtas vid nästa körning")
     args = parser.parse_args()
 
     config = load_config()
@@ -1040,6 +1232,7 @@ def main():
     log_path = str(base_output / "processed_files.json")
     report_path = str(base_output / f"analys-{folder_name}.docx")
     zotero_path = str(base_output / f"zotero-import-{folder_name}.ris")
+    pending_path = str(base_output / "pending-batch.json")
     extensions = [e.lower() for e in config["extensions"]]
 
     if args.refresh and not args.check:
@@ -1055,6 +1248,7 @@ def main():
     # Rensa bort poster för filer som inte längre finns eller bytt skiftläge
     print(f"Kontrollerar registret...")
     log = reconcile_registry(log)
+    merge_converted(log)
 
     changed, backfilled = detect_changes(log)
     if backfilled:
@@ -1072,11 +1266,23 @@ def main():
     if not args.check:
         save_log(log_path, log)
 
+    client = None
+    if Path(pending_path).exists() and not args.check:
+        client = anthropic.Anthropic()
+        # Filerna i en pågående batch står inte i registret och skulle annars skickas igen
+        if not collect_batch(client, pending_path, log, log_path, owner):
+            return
+
     file_groups, additions = find_files(config["folders"], extensions, log)
 
     if args.check:
         broken = [(k, v.get("reason")) for k, v in log.items() if entry_role(v) == "broken"]
         dups = [k for k, v in log.items() if v.get("identical_bytes")]
+        if Path(pending_path).exists():
+            with open(pending_path, encoding="utf-8") as f:
+                pending = json.load(f)
+            print(f"\nVäntande batch: {pending['batch_id']} ({len(pending['requests'])} grupper, "
+                  f"skickad {pending['submitted'][:16].replace('T', ' ')}) – hämtas vid nästa körning")
         print(f"\nPoster i registret: {len(log)}")
         print(f"Grupper att analysera: {len(file_groups)}")
         for g in file_groups:
@@ -1103,9 +1309,9 @@ def main():
     if additions:
         save_log(log_path, log)
 
-    client = anthropic.Anthropic()
+    client = client or anthropic.Anthropic()
 
-    print(f"Startar analys: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"Startar analys{' (batch)' if args.batch else ''}: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     print(f"Redan processade filer: {len(log)}")
     print(f"Nya grupper att processa: {len(file_groups)}\n")
 
@@ -1113,10 +1319,14 @@ def main():
     hash_index = {v["sha256"]: k for k, v in log.items() if entry_role(v) == "primary" and v.get("sha256")}
 
     results = []
+    usage_totals = {}
+    # Batch-läge: custom_id → grupp, och hash → custom_id för dubbletter inom körningen
+    batch_requests = {}
+    batch_hashes = {}
 
     for i, group in enumerate(file_groups, 1):
         label = " + ".join(Path(p).name for p in group)
-        print(f"[{i}/{len(file_groups)}] Analyserar: {label}")
+        print(f"[{i}/{len(file_groups)}] {'Förbereder' if args.batch else 'Analyserar'}: {label}")
 
         # Tomma filer markeras som trasiga var för sig; resten av gruppen analyseras
         for p in [p for p in group if Path(p).stat().st_size == 0]:
@@ -1144,39 +1354,43 @@ def main():
 
         digest = sha256_file(primary)
         if digest in hash_index and hash_index[digest] in log:
-            original = hash_index[digest]
-            print(f"  = Byte-identisk med {Path(original).name} – registreras som dubblett")
-            for p in group:
-                record(log, p, role="secondary", primary=original, duplicate_of=original,
-                       identical_bytes=(p == primary))
-                log[original]["analysis"].setdefault("all_filepaths", [original]).append(p)
+            store_duplicate(log, group, hash_index[digest])
             save_log(log_path, log)
             continue
 
-        try:
-            analysis = analyze_document(client, config, primary, content, owner)
-            analysis["all_filepaths"] = group
-            # RIS-posten ska peka på PDF om sådan finns, annars primary
-            pdf_paths = [p for p in group if Path(p).suffix.lower() == ".pdf"]
-            analysis["filepath"] = pdf_paths[0] if pdf_paths else primary
-            results.append(analysis)
+        if args.batch:
+            if digest in batch_hashes:
+                # Registreras som dubblett när originalets resultat hämtats
+                cid = batch_hashes[digest]
+                print(f"  = Byte-identisk med {Path(batch_requests[cid]['group'][0]).name} – väntar på batchen")
+                batch_requests[cid]["duplicates"].append(group)
+                continue
+            params, guard_context = prepare_request(config, primary, content, owner)
+            cid = f"g{len(batch_requests) + 1:04d}"
+            batch_requests[cid] = {"group": group, "guard_context": guard_context,
+                                   "duplicates": [], "params": params}
+            batch_hashes[digest] = cid
+            print(f"  → läggs i batchen som {cid}")
+            continue
 
-            record(log, primary, role="primary", schema_version=SCHEMA_VERSION,
-                   title=analysis.get("title"), author=analysis.get("author"), analysis=analysis)
-            # Markera även övriga filer i gruppen som processade
-            for p in group[1:]:
-                record(log, p, role="secondary", primary=primary, identical_bytes=False)
+        try:
+            analysis = analyze_document(client, config, primary, content, owner, usage_totals)
+            results.append(analysis)
+            store_analysis(log, analysis, group)
             hash_index[log[primary]["sha256"]] = primary
             save_log(log_path, log)
-            flags = ""
-            if analysis.get("ai_generated") in ("ja", "misstänkt"):
-                flags = f"  [AI: {analysis['ai_generated']}]"
-            print(f"  ✓ {analysis.get('author') or 'Okänd'} – {analysis.get('title', 'Utan titel')}{flags}")
 
         except Exception as e:
             print(f"  ✗ Fel vid analys: {e}")
 
-    print(f"\nKlart! {len(results)} dokument analyserade.")
+    if batch_requests:
+        batch_id = submit_batch(client, pending_path, batch_requests)
+        print(f"\n{len(batch_requests)} dokument skickade i batch {batch_id}.")
+        print("Kör skriptet igen om en stund (oftast inom en timme) för att hämta resultaten.")
+        print("Rapporten nedan innehåller bara tidigare analyserade dokument.")
+    else:
+        print(f"\nKlart! {len(results)} dokument analyserade.")
+        print_usage_summary(usage_totals)
 
     # Bygg lista med alla resultat - nya + tidigare analyserade
     all_results = [entry["analysis"] for entry in log.values() if entry_role(entry) == "primary"]

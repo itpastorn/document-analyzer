@@ -23,7 +23,7 @@ done
 
 run_analysis() {
     local dir="$1"
-    "$SCRIPT_DIR/.venv/Scripts/python" "$SCRIPT_DIR/analyzer.py" --folder "$dir"
+    "$SCRIPT_DIR/.venv/Scripts/python" "$SCRIPT_DIR/analyzer.py" --folder "$dir" --batch
 }
 
 # Mappar märkta med en needs-analysis-fil analyseras, sedan raderas märkfilen.
@@ -58,6 +58,17 @@ done
 find "$folder" -iname "processed_files.json" | while read -r file; do
     json_timestamp=$(stat -c "%Y" "$file")
     parent=$(dirname "$(dirname "$file")")
+
+    # En inskickad batch hämtas alltid, oavsett filernas tidsstämplar
+    if [ -f "$parent/analyzer/pending-batch.json" ]; then
+        if $dry_run; then
+            echo "Batch att hämta i $parent"
+        else
+            echo "Hämtar batch i $parent"
+            run_analysis "$parent"
+        fi
+        continue
+    fi
 
     newest_epoch=$(find "$parent" -maxdepth 1 -type f \
         | xargs stat -c "%Y" 2>/dev/null \

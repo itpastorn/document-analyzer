@@ -16,6 +16,8 @@ Genomsöker en mapp med dokument (ej rekursivt), analyserar innehållet med hjä
 - Analyserar om filer vars innehåll har ändrats (SHA-256), även om namnet är detsamma
 - Hanterar skiftlägesbyten i filnamn utan dubbla poster
 - Registrerar byte-identiska kopior och tomma eller oläsbara filer som åtgärdspunkter
+- Behandlar `bok.epub` och `bok-converted.pdf` som samma verk (se *Filer som hör ihop* nedan)
+- Kan skicka analyserna som batch till halva priset (`--batch`)
 - Genererar en Word-rapport grupperad efter dokumenttyp
 - Exporterar en RIS-fil för import till Zotero
 - Sparar rapport och logg i en `analyzer`-mapp i den analyserade katalogen
@@ -35,13 +37,15 @@ Genomsöker en mapp med dokument (ej rekursivt), analyserar innehållet med hjä
 ./analyze-all.sh --folder /sökväg/till/mapp --dry-run
 ```
 
-Två saker utlöser analys:
+Alla analyser körs med `--batch` (se nedan). Tre saker utlöser en körning:
 
 1. **En `needs-analysis`-fil i mappen** – mappen analyseras och märkfilen raderas
    efteråt. Misslyckas analysen behålls filen. Ligger `needs-analysis` i en mapp
    som redan har en `analyzer`-undermapp är den ett misstag: den raderas utan att
    analys körs.
-2. **Nyare filer än loggen** – finns en `analyzer/processed_files.json` och någon
+2. **En väntande batch** – finns en `analyzer/pending-batch.json` körs analysen
+   för att hämta resultaten, oavsett filernas tidsstämplar.
+3. **Nyare filer än loggen** – finns en `analyzer/processed_files.json` och någon
    fil i mappen är nyare än den, körs analysen om.
 
 ### Sortera RIS-filer
@@ -150,6 +154,9 @@ python analyzer.py --recheck-owner
 # Se vad som skulle hända, utan API-anrop
 python analyzer.py --check
 
+# Skicka nya dokument som batch till halva priset
+python analyzer.py --batch
+
 # Kombinera flaggor
 python analyzer.py --folder /sökväg/till/mapp --refresh --noris
 ```
@@ -164,6 +171,28 @@ python analyzer.py --folder /sökväg/till/mapp --refresh --noris
 arkivägaren eller ingen alls står som författare.
 `--check` – Visar vad som skulle göras (nya, ändrade, trasiga filer,
 dubbletter och filer som inte analyseras) utan att anropa Claude eller ändra något.
+Sammanslagningar av converted-dubbletter visas men sparas inte.
+`--batch` – Skickar alla nya dokument i en batch (Message Batches API) till halva
+priset och sparar batch-id i `analyzer/pending-batch.json`. Svaret kommer oftast
+inom en timme, senast inom 24 timmar. Nästa körning, med eller utan `--batch`,
+hämtar resultaten om batchen är klar och avslutas annars utan att göra något.
+Rapporten från körningen som skickar batchen innehåller bara tidigare analyserade
+dokument.
+
+### Filer som hör ihop
+
+Filer i samma mapp med samma namn, förutom filändelsen och ett eventuellt
+suffix `-converted`, räknas som ett verk. `bok.epub` och `bok-converted.pdf`
+analyseras alltså en gång, inte två. Suffixet `-converted` är det som läggs på
+när en epub konverteras till PDF.
+
+- Epub går före PDF som analyskälla. Samma prioritet gäller för `bok.epub`
+  och `bok.pdf`.
+- RIS-posten länkar till PDF-filen om det finns en.
+- Verk som redan analyserats som två separata poster slås ihop automatiskt vid
+  nästa körning: originalets analys behålls, den andra filens analys kasseras och
+  filen blir en sekundär post. Den försvinner då ur rapport och RIS men finns kvar
+  i `processed_files.json`.
 
 ### Resultaten
 
@@ -173,6 +202,7 @@ Resultaten sparas i en `analyzer`-mapp inuti den analyserade katalogen:
   trasiga filer) och en lista över filer som inte analyserats (t.ex. bilder)
 - `zotero-import-[mappnamn].ris` – Zotero-importfil
 - `processed_files.json` – register över analyserade filer
+- `pending-batch.json` – finns bara medan en batch väntar på svar
 
 Vid upprepade körningar analyseras bara nya och ändrade filer, men rapporten
 regenereras alltid med allt innehåll.
@@ -185,7 +215,7 @@ Nyckeln är filens fullständiga sökväg. Varje post har `role`, `processed`
 | `role` | Betydelse | Övriga fält |
 |---|---|---|
 | `primary` | Analyserad fil | `schema_version`, `title`, `author`, `analysis` |
-| `secondary` | Samma verk som en primärpost: PDF bredvid EPUB, eller en byte-identisk kopia. Har ingen egen analys – läs primärpostens. | `primary`, `identical_bytes`, och för kopior `duplicate_of` |
+| `secondary` | Samma verk som en primärpost: PDF bredvid EPUB (även `-converted`), eller en byte-identisk kopia. Har ingen egen analys – läs primärpostens. | `primary`, `identical_bytes`, och för kopior `duplicate_of` |
 | `broken` | Tom eller oläsbar fil | `reason` |
 
 Poster från före schemaversion 2 saknar `role` och `schema_version`: en post med
@@ -307,6 +337,7 @@ Kräver dessutom: Python 3.12+, Anthropic API-nyckel, LibreOffice (för SDW/ODT)
 ```text
 document-analyzer/
 ├── analyzer.py               # Huvudskript för dokumentanalys
+├── analyze-all.sh            # Kör analysen i många mappar
 ├── ris-sort.py               # Sorterar RIS-filer
 ├── convert-sam-to-docx.py    # Konverterar Ami Pro .SAM till DOCX
 ├── convert-doc-to-docx.ps1   # Konverterar gamla .DOC till DOCX
